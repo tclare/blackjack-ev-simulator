@@ -1,24 +1,15 @@
-import React from 'react';
-import logo from './logo.svg';
 import './App.css';
+import { SettingsPane } from './components/settings-pane/SettingsPane';
+import SimulationTable from './components/simulation-table/SimulationTable';
 
 function App() {
+
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.tsx</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
+    <div className="h-screen">
+      <div className="h-full flex items-center gap-6 justify-evenly wrap">
+        <SimulationTable />
+        <SettingsPane />
+      </div>
     </div>
   );
 }

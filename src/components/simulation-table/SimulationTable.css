@@ -1,0 +1,16 @@
+td {
+    border: 1px solid black;
+    width: 50px;
+    text-align: center;
+    padding: 0;
+}
+
+table {
+    table-layout: fixed;
+    max-width: 500px;
+    border-collapse: collapse;
+}
+
+.table-header-value {
+    border: 2px solid black;
+}
