@@ -1,9 +1,8 @@
-import _, { random } from "lodash";
+import _ from "lodash";
 import { Card, CardRankImpl, CardSuit } from "../types/Card";
 import { handToClassification } from "./hand";
 import { BlackjackAction } from "../types/Action";
 import { HandClassification, HandType } from "../types/HandClassification";
-import { bestAction } from "./action";
 import { getNextScenario } from "./stratifiedDealing";
 
 export const HandRanks: CardRankImpl[]  = [
@@ -328,7 +327,7 @@ export function playBlackjackRecursiveDealer(hand: Card[]): number {
     // Dealer hand represents bust - we assign it a value of 0
     hc.value > 21 ? 0
     // Dealer stands on hard 17+ (better odds) or soft 18+
-    : hc.value >= 18 || hc.value === 17 && (hc.type === HandType.HARD || !DECK_SETTINGS["HIT_SOFT_17"]) ? hc.value
+    : hc.value >= 18 || (hc.value === 17 && (hc.type === HandType.HARD || !DECK_SETTINGS["HIT_SOFT_17"])) ? hc.value
     // Dealer hits on anything else
     : playBlackjackRecursiveDealer([...hand, randomCard()])
   );

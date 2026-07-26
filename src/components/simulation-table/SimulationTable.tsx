@@ -5,7 +5,7 @@ import { BET_SIZE, HandRanks } from "../../util/deck";
 import { useSimulationResults } from "../../workers/simulationPool";
 import { formatCount } from "../../util/format";
 import _ from "lodash";
-import { Button, Card, ConfigProvider, Divider, Popover } from "antd";
+import { Button, ConfigProvider, Divider, Popover } from "antd";
 
 const dealerClassifications = _.uniq(HandRanks.map(hr => hr.pairSymbol));
 const allPlayerClassifications = Object.values(PlayerHandClassification);

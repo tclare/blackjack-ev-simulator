@@ -1,4 +1,4 @@
-import { Card, CardSuitValue } from "../types/Card";
+import { Card } from "../types/Card";
 import { HandClassification, HandType } from "../types/HandClassification";
 
 
