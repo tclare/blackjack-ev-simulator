@@ -24,6 +24,17 @@ export const SettingsPane: FC = () => {
     <div className="h-full w-[500px] h-[750px] bg-orange-50 rounded-lg p-4 flex gap-y-4 flex-col">
       <div className="text-2xl font-bold text-center">Basic Strategy Learner</div>
       <Divider className="my-0" />
+      <div className="flex flex-col gap-y-0.5">
+        <div className="font-bold">INTRODUCTION</div>
+        <p className="text-sm text-gray-600">
+          Blackjack players often utilize various basic strategy cards without fully grasping the intuition behind
+          its recommendations. This tool is an interactive basic strategy chart, populated via a Monte Carlo
+          simulation running up to millions of blackjack hands per second. Click on a cell to understand how other
+          decisions are not as good as the basic strategy recommendation, and for an example hand where the optimal
+          decision gets rewarded.
+        </p>
+      </div>
+      <Divider className="my-0" />
       <div className="font-bold">CASINO RULE SETTINGS</div>
       <div className="flex flex-col gap-y-0.5">
         <div className="flex w-full justify-between">

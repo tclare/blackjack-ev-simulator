@@ -2,6 +2,7 @@ import _ from "lodash";
 import { useSyncExternalStore } from "react";
 import { BET_SIZE, DECK_SETTINGS, DeckSettings } from "../util/deck";
 import { ResultsTree, RoundOutcome, WorkerInboundMessage, WorkerOutboundMessage } from "./simulationMessages";
+import { ExampleHandsTree, HandExample } from "../types/HandExample";
 
 const WORKER_COUNT = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 8));
 
@@ -23,8 +24,29 @@ function mergeResultsTrees(trees: ResultsTree[]): ResultsTree {
   });
 }
 
+/** Total card count across an example's dealer hand plus every player hand it recorded. */
+function totalCardCount(example: HandExample): number {
+  return example.dealerCards.length + example.hands.reduce((n, h) => n + h.cards.length, 0);
+}
+
+/**
+ * Unlike `mergeResultsTrees`'s stats (which sum across workers), a `HandExample` leaf is a single
+ * concrete example round - it can't be summed, so wherever two workers both reported an example for
+ * the same cell, this keeps whichever one has fewer total cards, exactly matching the "simplest
+ * example wins" rule each worker already applies internally (deck.ts's `recordExampleHand`).
+ */
+function mergeExampleHandsTrees(trees: ExampleHandsTree[]): ExampleHandsTree {
+  return _.mergeWith({}, ...trees, (a: unknown, b: unknown) => {
+    if (a && typeof a === "object" && "dealerCards" in a && b && typeof b === "object" && "dealerCards" in b) {
+      return totalCardCount(a as HandExample) <= totalCardCount(b as HandExample) ? a : b;
+    }
+    return undefined;
+  });
+}
+
 export interface SimulationSnapshot {
   results: ResultsTree;
+  exampleHands: ExampleHandsTree;
   handsPlayed: number;
   wins: number;
   losses: number;
@@ -41,12 +63,13 @@ const EMPTY_ROUND_OUTCOME: RoundOutcome = [0, 0, 0, 0, 0];
 // total) and recompute the merged view from scratch - accumulating incoming messages over time
 // would re-add each worker's own growth on every tick.
 const latestResultsPerWorker: ResultsTree[] = _.times(WORKER_COUNT, () => ({}));
+const latestExampleHandsPerWorker: ExampleHandsTree[] = _.times(WORKER_COUNT, () => ({}));
 const latestRoundOutcomePerWorker: RoundOutcome[] = _.times(WORKER_COUNT, () => EMPTY_ROUND_OUTCOME);
 
 let currentSettings: DeckSettings = { ...DECK_SETTINGS };
 
 let snapshot: SimulationSnapshot = {
-  results: {}, handsPlayed: 0, wins: 0, losses: 0, pushes: 0, overallEV: "0%", settings: currentSettings,
+  results: {}, exampleHands: {}, handsPlayed: 0, wins: 0, losses: 0, pushes: 0, overallEV: "0%", settings: currentSettings,
 };
 const listeners = new Set<() => void>();
 
@@ -57,6 +80,7 @@ function recomputeSnapshot() {
   );
   snapshot = {
     results: mergeResultsTrees(latestResultsPerWorker),
+    exampleHands: mergeExampleHandsTrees(latestExampleHandsPerWorker),
     handsPlayed,
     wins,
     losses,
@@ -101,6 +125,7 @@ const workers: Worker[] = _.times(WORKER_COUNT, (i) => {
     const message = event.data;
     if (message.type === "results") {
       latestResultsPerWorker[i] = message.results;
+      latestExampleHandsPerWorker[i] = message.exampleHands;
       latestRoundOutcomePerWorker[i] = message.roundOutcome;
       scheduleNotify();
     }
@@ -119,6 +144,7 @@ export function updateSettings(settings: DeckSettings) {
   notifyTimer = undefined;
   for (let i = 0; i < WORKER_COUNT; i++) {
     latestResultsPerWorker[i] = {};
+    latestExampleHandsPerWorker[i] = {};
     latestRoundOutcomePerWorker[i] = EMPTY_ROUND_OUTCOME;
   }
   recomputeSnapshot();

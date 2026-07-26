@@ -4,6 +4,7 @@ import { handToClassification } from "./hand";
 import { BlackjackAction } from "../types/Action";
 import { HandClassification, HandType } from "../types/HandClassification";
 import { getNextScenario } from "./stratifiedDealing";
+import { ExampleHandsTree, HandExample, PlayedHand } from "../types/HandExample";
 
 export const HandRanks: CardRankImpl[]  = [
   { symbol: "2", longWord: "Two", values: [2], pairSymbol: "2"},
@@ -59,6 +60,36 @@ function cardFromRankSymbol(rankSymbol: string, suit: CardSuit): Card {
 
 export let results: {[p: string]: {[d: string] : {[a: string]: number[]}}} = {};
 
+// A concrete winning example round for each (playerSymbol, dealerSymbol, action) cell, kept purely
+// for the popover's "Example Hand" display. Only overwritten by a win (evDelta > 0) whose total
+// card count (all player hand(s) plus the dealer's) is smaller than whatever's currently stored -
+// so the table converges on the simplest available example rather than the first or most recent
+// one seen, which would often be needlessly bloated by a long hit-out. Surrender is the one
+// exception: it always forfeits half the bet (evDelta is always negative), so it can never "win" -
+// any recorded Surrender is kept regardless of evDelta, or no Surrender cell could ever show one.
+export let exampleHands: ExampleHandsTree = {};
+
+function totalCardCount(example: HandExample): number {
+  return example.dealerCards.length + example.hands.reduce((n, h) => n + h.cards.length, 0);
+}
+
+function recordExampleHand(
+  playerSymbol: string,
+  dealerSymbol: string,
+  action: BlackjackAction,
+  hands: PlayedHand[],
+  dealerCards: Card[],
+  evDelta: number,
+) {
+  if (action !== BlackjackAction.SURRENDER && evDelta <= 0) return;
+  const candidate: HandExample = { dealerCards, hands };
+  const existing = exampleHands[playerSymbol]?.[dealerSymbol]?.[action];
+  if (existing && totalCardCount(existing) <= totalCardCount(candidate)) return;
+  if (!exampleHands[playerSymbol]) exampleHands[playerSymbol] = {};
+  if (!exampleHands[playerSymbol][dealerSymbol]) exampleHands[playerSymbol][dealerSymbol] = {};
+  exampleHands[playerSymbol][dealerSymbol][action] = candidate;
+}
+
 let cardIndex = 0;
 let cards = _.times(NUM_DECKS, _ => Deck()).flat();
 
@@ -90,7 +121,11 @@ export function playBlackjackHandPlayer(hand: Card[]): [number, number] {
 // units it involved) is what lets Double (evDelta scaled to a bet of 2x) and Split (evDelta summed
 // across two hands) compare fairly against Stand/Hit's plain single-hand evDelta, all relative to
 // the same original bet.
-type RecordOutcome = (playerSymbol: string, action: BlackjackAction, evDelta: number, wins: number, losses: number, pushes: number) => void;
+// `isActual` distinguishes the one branch a round really followed from every other branch explored
+// purely for the Hand Breakdown's EV comparison - e.g. a hard-7 hand always gets a hypothetical
+// "what if you'd stood here" Stand outcome recorded alongside its Hit outcome, but only whichever one
+// `bestKnownAction` actually picked is a real, complete playthrough worth remembering as an example.
+type RecordOutcome = (playerSymbol: string, action: BlackjackAction, hands: PlayedHand[], dealerCards: Card[], isActual: boolean, evDelta: number, wins: number, losses: number, pushes: number) => void;
 
 /** Scores a single resolved hand against the dealer's final hand, as an [evDelta, win, loss, push] tuple. */
 function scoreAgainstDealer(value: number, bet: number, dealerHandResult: number): [number, number, number, number] {
@@ -132,15 +167,24 @@ function bestKnownAction(
  * so the caller's own HIT comparison isn't diluted by averaging in every possible (including bad)
  * way the hand could subsequently have been played.
  */
-function playOutWithCurrentPolicy(hand: Card[], bet: number, dealerCard: Card, dealerHandResult: number, record: RecordOutcome): number {
+interface PlayOutResult {
+  value: number;
+  cards: Card[];
+}
+
+function playOutWithCurrentPolicy(hand: Card[], bet: number, dealerCard: Card, dealerCards: Card[], dealerHandResult: number, record: RecordOutcome, ancestorActual: boolean = true): PlayOutResult {
   const hc = handToClassification(hand);
-  if (hc.value >= 21) return hc.value > 21 ? -Infinity : hc.value;
+  if (hc.value >= 21) return { value: hc.value > 21 ? -Infinity : hc.value, cards: hand };
 
-  record(hc.symbol, BlackjackAction.STAND, ...scoreAgainstDealer(hc.value, bet, dealerHandResult));
-  const hitValue = playOutWithCurrentPolicy([...hand, randomCard()], bet, dealerCard, dealerHandResult, record);
-  record(hc.symbol, BlackjackAction.HIT, ...scoreAgainstDealer(hitValue, bet, dealerHandResult));
+  // Decided upfront (before either branch below is recorded) so both records below can be tagged
+  // with whether they're the one real continuation of this round, not just a hypothetical comparison.
+  const chosen = bestKnownAction(hc.symbol, dealerCard.rank.pairSymbol, hc);
 
-  return bestKnownAction(hc.symbol, dealerCard.rank.pairSymbol, hc) === BlackjackAction.HIT ? hitValue : hc.value;
+  record(hc.symbol, BlackjackAction.STAND, [{ cards: hand, action: BlackjackAction.STAND }], dealerCards, ancestorActual && chosen !== BlackjackAction.HIT, ...scoreAgainstDealer(hc.value, bet, dealerHandResult));
+  const hitResult = playOutWithCurrentPolicy([...hand, randomCard()], bet, dealerCard, dealerCards, dealerHandResult, record, ancestorActual && chosen === BlackjackAction.HIT);
+  record(hc.symbol, BlackjackAction.HIT, [{ cards: hitResult.cards, action: BlackjackAction.HIT }], dealerCards, ancestorActual && chosen === BlackjackAction.HIT, ...scoreAgainstDealer(hitResult.value, bet, dealerHandResult));
+
+  return chosen === BlackjackAction.HIT ? hitResult : { value: hc.value, cards: hand };
 }
 
 /**
@@ -150,32 +194,45 @@ function playOutWithCurrentPolicy(hand: Card[], bet: number, dealerCard: Card, d
  * and by each hand produced by a split (which can only double if double-after-split is allowed) -
  * both are otherwise "a fresh two-card hand vs. the dealer's upcard".
  */
-function playTwoCardHand(hand: Card[], bet: number, dealerCard: Card, dealerHandResult: number, record: RecordOutcome, allowDouble: boolean = true): [number, number] {
+interface TwoCardHandResult {
+  value: number;
+  bet: number;
+  cards: Card[];
+  action: BlackjackAction;
+}
+
+function playTwoCardHand(hand: Card[], bet: number, dealerCard: Card, dealerCards: Card[], dealerHandResult: number, record: RecordOutcome, allowDouble: boolean = true, ancestorActual: boolean = true): TwoCardHandResult {
   const hc = handToClassification(hand);
 
+  // Decided upfront (before any of Stand/Hit/Double is recorded below) so each can be tagged with
+  // whether it's the one real path this hand actually followed, not just an EV comparison point.
+  const candidates = allowDouble
+    ? [BlackjackAction.STAND, BlackjackAction.HIT, BlackjackAction.DOUBLE]
+    : [BlackjackAction.STAND, BlackjackAction.HIT];
+  const chosen = bestKnownAction(hc.symbol, dealerCard.rank.pairSymbol, hc, candidates);
+
   // Stand
-  record(hc.symbol, BlackjackAction.STAND, ...scoreAgainstDealer(hc.value, bet, dealerHandResult));
+  record(hc.symbol, BlackjackAction.STAND, [{ cards: hand, action: BlackjackAction.STAND }], dealerCards, ancestorActual && chosen === BlackjackAction.STAND, ...scoreAgainstDealer(hc.value, bet, dealerHandResult));
 
   // Hit once, then continue playing out the hand using the engine's current best-known strategy.
-  const hitValue = playOutWithCurrentPolicy([...hand, randomCard()], bet, dealerCard, dealerHandResult, record);
-  record(hc.symbol, BlackjackAction.HIT, ...scoreAgainstDealer(hitValue, bet, dealerHandResult));
+  const hitResult = playOutWithCurrentPolicy([...hand, randomCard()], bet, dealerCard, dealerCards, dealerHandResult, record, ancestorActual && chosen === BlackjackAction.HIT);
+  record(hc.symbol, BlackjackAction.HIT, [{ cards: hitResult.cards, action: BlackjackAction.HIT }], dealerCards, ancestorActual && chosen === BlackjackAction.HIT, ...scoreAgainstDealer(hitResult.value, bet, dealerHandResult));
 
   // Double down - exactly one more card, then the hand is over. Not legal on a split hand unless
   // double-after-split is allowed.
   let doubleValue: number = -Infinity;
+  let doubleCards: Card[] = hand;
   if (allowDouble) {
-    const doubleHc = handToClassification([...hand, randomCard()]);
+    doubleCards = [...hand, randomCard()];
+    const doubleHc = handToClassification(doubleCards);
     doubleValue = doubleHc.value > 21 ? -Infinity : doubleHc.value;
-    record(hc.symbol, BlackjackAction.DOUBLE, ...scoreAgainstDealer(doubleValue, bet * 2, dealerHandResult));
+    record(hc.symbol, BlackjackAction.DOUBLE, [{ cards: doubleCards, action: BlackjackAction.DOUBLE }], dealerCards, ancestorActual && chosen === BlackjackAction.DOUBLE, ...scoreAgainstDealer(doubleValue, bet * 2, dealerHandResult));
   }
 
-  const candidates = allowDouble
-    ? [BlackjackAction.STAND, BlackjackAction.HIT, BlackjackAction.DOUBLE]
-    : [BlackjackAction.STAND, BlackjackAction.HIT];
-  switch (bestKnownAction(hc.symbol, dealerCard.rank.pairSymbol, hc, candidates)) {
-    case BlackjackAction.HIT: return [hitValue, bet];
-    case BlackjackAction.DOUBLE: return [doubleValue, bet * 2];
-    default: return [hc.value, bet];
+  switch (chosen) {
+    case BlackjackAction.HIT: return { value: hitResult.value, bet, cards: hitResult.cards, action: BlackjackAction.HIT };
+    case BlackjackAction.DOUBLE: return { value: doubleValue, bet: bet * 2, cards: doubleCards, action: BlackjackAction.DOUBLE };
+    default: return { value: hc.value, bet, cards: hand, action: BlackjackAction.STAND };
   }
 }
 
@@ -192,20 +249,32 @@ function playTwoCardHand(hand: Card[], bet: number, dealerCard: Card, dealerHand
  * losses, pushes] across however many hands this one ace ultimately resolved into (exactly 1,
  * unless re-split aces is allowed and kept chaining).
  */
-function resolveAceSplitHand(aceCard: Card, bet: number, dealerCard: Card, dealerHandResult: number): [number, number, number, number] {
+interface AceSplitResult {
+  evDelta: number;
+  wins: number;
+  losses: number;
+  pushes: number;
+  hands: PlayedHand[];
+}
+
+function resolveAceSplitHand(aceCard: Card, bet: number, dealerCard: Card, dealerHandResult: number): AceSplitResult {
   const hand = [aceCard, randomCard()];
   const hc = handToClassification(hand);
   if (hc.type === HandType.PAIR && DECK_SETTINGS.RESPLIT_ACES_ALLOWED) {
     const firstOutcome = resolveAceSplitHand(hand[0], bet, dealerCard, dealerHandResult);
     const secondOutcome = resolveAceSplitHand(hand[1], bet, dealerCard, dealerHandResult);
-    return [
-      firstOutcome[0] + secondOutcome[0],
-      firstOutcome[1] + secondOutcome[1],
-      firstOutcome[2] + secondOutcome[2],
-      firstOutcome[3] + secondOutcome[3],
-    ];
+    return {
+      evDelta: firstOutcome.evDelta + secondOutcome.evDelta,
+      wins: firstOutcome.wins + secondOutcome.wins,
+      losses: firstOutcome.losses + secondOutcome.losses,
+      pushes: firstOutcome.pushes + secondOutcome.pushes,
+      hands: [...firstOutcome.hands, ...secondOutcome.hands],
+    };
   }
-  return scoreAgainstDealer(hc.value, bet, dealerHandResult);
+  // No hit/stand/double choice is ever actually offered on a dealt ace-split hand, so there's no
+  // real action to attach - labeled STAND for display purposes since the hand is simply held as-is.
+  const [evDelta, wins, losses, pushes] = scoreAgainstDealer(hc.value, bet, dealerHandResult);
+  return { evDelta, wins, losses, pushes, hands: [{ cards: hand, action: BlackjackAction.STAND }] };
 }
 
 // The aggregate "how is my bankroll actually doing" tally: [evSum, handsPlayed, wins, losses,
@@ -240,6 +309,7 @@ export function playBlackjackRecursivePlayer(
   hand: Card[],
   bet: number,
   dealerCard: Card,
+  dealerCards: Card[],
   dealerHasBlackjack: boolean,
   dealerHandResult: number,
   record: RecordOutcome,
@@ -258,12 +328,27 @@ export function playBlackjackRecursivePlayer(
 
   const hc = handToClassification(hand);
 
+  // Decided upfront, before any branch below is played out or recorded, so every record below can
+  // be tagged with whether it's the one real path this round actually took - not just one of several
+  // hypothetical alternatives compared for the Hand Breakdown. Candidate eligibility only depends on
+  // structural facts known immediately (hand type, settings) - never on the branches' own computed
+  // outcomes - so this doesn't need to wait for them to be evaluated.
+  const candidates = [
+    BlackjackAction.STAND, BlackjackAction.HIT, BlackjackAction.DOUBLE,
+    ...(DECK_SETTINGS.LATE_SURRENDER_ALLOWED ? [BlackjackAction.SURRENDER] : []),
+    ...(hc.type === HandType.PAIR ? [BlackjackAction.SPLIT] : []),
+  ];
+  const chosenAction = bestKnownAction(hc.symbol, dealerCard.rank.pairSymbol, hc, candidates);
+
   // Stand, hit, and double - shared with how any two-card hand (including a split hand) is played.
-  const [standHitDoubleValue, standHitDoubleBet] = playTwoCardHand(hand, bet, dealerCard, dealerHandResult, record);
+  const { value: standHitDoubleValue, bet: standHitDoubleBet } = playTwoCardHand(
+    hand, bet, dealerCard, dealerCards, dealerHandResult, record, true,
+    chosenAction !== BlackjackAction.SURRENDER && chosenAction !== BlackjackAction.SPLIT,
+  );
 
   // Surrender - forfeit half the bet to end the hand immediately. Only legal on the original hand.
   if (DECK_SETTINGS.LATE_SURRENDER_ALLOWED) {
-    record(hc.symbol, BlackjackAction.SURRENDER, ...scoreAgainstDealer(-Infinity, bet / 2, dealerHandResult));
+    record(hc.symbol, BlackjackAction.SURRENDER, [{ cards: hand, action: BlackjackAction.SURRENDER }], dealerCards, chosenAction === BlackjackAction.SURRENDER, ...scoreAgainstDealer(-Infinity, bet / 2, dealerHandResult));
   }
 
   // Split - only legal when the two starting cards share a rank (T/J/Q/K all count as one rank).
@@ -276,38 +361,38 @@ export function playBlackjackRecursivePlayer(
   // instead of one and so overstate how attractive splitting is (exactly the way Double's EV is
   // scored against the original bet even though it also risks two units).
   let splitOutcome: [number, number, number, number] | undefined;
+  let splitHands: PlayedHand[] = [];
   if (hc.type === HandType.PAIR) {
+    const splitIsActual = chosenAction === BlackjackAction.SPLIT;
     if (hc.symbol === "AA") {
       const firstOutcome = resolveAceSplitHand(hand[0], bet, dealerCard, dealerHandResult);
       const secondOutcome = resolveAceSplitHand(hand[1], bet, dealerCard, dealerHandResult);
       splitOutcome = [
-        firstOutcome[0] + secondOutcome[0],
-        firstOutcome[1] + secondOutcome[1],
-        firstOutcome[2] + secondOutcome[2],
-        firstOutcome[3] + secondOutcome[3],
+        firstOutcome.evDelta + secondOutcome.evDelta,
+        firstOutcome.wins + secondOutcome.wins,
+        firstOutcome.losses + secondOutcome.losses,
+        firstOutcome.pushes + secondOutcome.pushes,
       ];
+      splitHands = [...firstOutcome.hands, ...secondOutcome.hands];
     } else {
       const allowDouble = DECK_SETTINGS.DOUBLE_AFTER_SPLIT_ALLOWED;
-      const [firstValue, firstBet] = playTwoCardHand([hand[0], randomCard()], bet, dealerCard, dealerHandResult, record, allowDouble);
-      const [secondValue, secondBet] = playTwoCardHand([hand[1], randomCard()], bet, dealerCard, dealerHandResult, record, allowDouble);
-      const [firstEv, firstWin, firstLoss, firstPush] = scoreAgainstDealer(firstValue, firstBet, dealerHandResult);
-      const [secondEv, secondWin, secondLoss, secondPush] = scoreAgainstDealer(secondValue, secondBet, dealerHandResult);
+      const firstResult = playTwoCardHand([hand[0], randomCard()], bet, dealerCard, dealerCards, dealerHandResult, record, allowDouble, splitIsActual);
+      const secondResult = playTwoCardHand([hand[1], randomCard()], bet, dealerCard, dealerCards, dealerHandResult, record, allowDouble, splitIsActual);
+      const [firstEv, firstWin, firstLoss, firstPush] = scoreAgainstDealer(firstResult.value, firstResult.bet, dealerHandResult);
+      const [secondEv, secondWin, secondLoss, secondPush] = scoreAgainstDealer(secondResult.value, secondResult.bet, dealerHandResult);
       splitOutcome = [firstEv + secondEv, firstWin + secondWin, firstLoss + secondLoss, firstPush + secondPush];
+      splitHands = [
+        { cards: firstResult.cards, action: firstResult.action },
+        { cards: secondResult.cards, action: secondResult.action },
+      ];
     }
-    record(hc.symbol, BlackjackAction.SPLIT, ...splitOutcome);
+    record(hc.symbol, BlackjackAction.SPLIT, splitHands, dealerCards, splitIsActual, ...splitOutcome);
   }
 
   // Everything above was recorded purely for strategy-table comparison; a real round only ever has
-  // ONE outcome. Pick whichever single action currently looks best among the legal options (the
-  // same data driving the table) and tally only that one, so the aggregate reflects "if you always
-  // follow the recommended strategy" rather than summing every hypothetical alternative considered.
-  const candidates = [
-    BlackjackAction.STAND, BlackjackAction.HIT, BlackjackAction.DOUBLE,
-    ...(DECK_SETTINGS.LATE_SURRENDER_ALLOWED ? [BlackjackAction.SURRENDER] : []),
-    ...(splitOutcome ? [BlackjackAction.SPLIT] : []),
-  ];
-  const chosenAction = bestKnownAction(hc.symbol, dealerCard.rank.pairSymbol, hc, candidates);
-
+  // ONE outcome. Tally only the action already chosen upfront, so the aggregate reflects "if you
+  // always follow the recommended strategy" rather than summing every hypothetical alternative
+  // considered.
   if (chosenAction === BlackjackAction.SURRENDER) {
     recordRoundOutcome(...scoreAgainstDealer(-Infinity, bet / 2, dealerHandResult));
   } else if (chosenAction === BlackjackAction.SPLIT && splitOutcome) {
@@ -321,16 +406,22 @@ export function playBlackjackRecursivePlayer(
 }
 
 
-export function playBlackjackRecursiveDealer(hand: Card[]): number {
+/** Plays the dealer's hand to completion and returns its final cards (not just the resulting value). */
+export function playBlackjackRecursiveDealer(hand: Card[]): Card[] {
   const hc = handToClassification(hand);
   return (
-    // Dealer hand represents bust - we assign it a value of 0
-    hc.value > 21 ? 0
-    // Dealer stands on hard 17+ (better odds) or soft 18+
-    : hc.value >= 18 || (hc.value === 17 && (hc.type === HandType.HARD || !DECK_SETTINGS["HIT_SOFT_17"])) ? hc.value
+    // Dealer stands on a bust, hard 17+ (better odds), or soft 18+
+    hc.value > 21 ? hand
+    : hc.value >= 18 || (hc.value === 17 && (hc.type === HandType.HARD || !DECK_SETTINGS["HIT_SOFT_17"])) ? hand
     // Dealer hits on anything else
     : playBlackjackRecursiveDealer([...hand, randomCard()])
   );
+}
+
+/** A dealer bust (hand value > 21) scores as 0 against the player, same convention as before. */
+function dealerHandValue(cards: Card[]): number {
+  const hc = handToClassification(cards);
+  return hc.value > 21 ? 0 : hc.value;
 }
 
 
@@ -352,9 +443,10 @@ export function playBlackjackRecursive() {
   if (handToClassification(playerCards).value === 21) return;
 
   const dealerHasBlackjack = handToClassification([dealerCard, dealerHoleCard]).value === 21;
-  const dealerHandResult = dealerHasBlackjack ? 21 : playBlackjackRecursiveDealer([dealerCard, dealerHoleCard]);
+  const dealerCards = dealerHasBlackjack ? [dealerCard, dealerHoleCard] : playBlackjackRecursiveDealer([dealerCard, dealerHoleCard]);
+  const dealerHandResult = dealerHasBlackjack ? 21 : dealerHandValue(dealerCards);
 
-  playBlackjackRecursivePlayer(playerCards, BET_SIZE, dealerCard, dealerHasBlackjack, dealerHandResult, (playerSymbol, action, evDelta, wins, losses, pushes) => {
+  playBlackjackRecursivePlayer(playerCards, BET_SIZE, dealerCard, dealerCards, dealerHasBlackjack, dealerHandResult, (playerSymbol, action, hands, actualDealerCards, isActual, evDelta, wins, losses, pushes) => {
     const dealerSymbol = dealerCard.rank.pairSymbol;
     // Deliberately built with plain object literals rather than `_.set(results, [playerSymbol,
     // dealerSymbol, action], ...)`: lodash's `_.set` auto-vivifies each intermediate level as an
@@ -373,6 +465,12 @@ export function playBlackjackRecursive() {
       res[3] + losses,
       res[4] + pushes
     ] : [evDelta, 1, wins, losses, pushes];
+
+    // Only the branch that actually happened (not every hypothetical comparison point) is worth
+    // remembering as a concrete example - see the RecordOutcome/isActual comment above.
+    if (isActual) {
+      recordExampleHand(playerSymbol, dealerSymbol, action, hands, actualDealerCards, evDelta);
+    }
   });
 }
 
@@ -382,5 +480,6 @@ export function playBlackjack() {
 
 export function clearResults() {
   results = {};
+  exampleHands = {};
   roundOutcome = [0, 0, 0, 0, 0];
 }

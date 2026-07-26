@@ -1,4 +1,5 @@
 import { DeckSettings } from "../util/deck";
+import { ExampleHandsTree } from "../types/HandExample";
 
 export type ResultsTree = { [player: string]: { [dealer: string]: { [action: string]: number[] } } };
 
@@ -12,4 +13,4 @@ export type WorkerInboundMessage =
 
 export type WorkerOutboundMessage =
   | { type: "ready" }
-  | { type: "results"; results: ResultsTree; roundOutcome: RoundOutcome };
+  | { type: "results"; results: ResultsTree; roundOutcome: RoundOutcome; exampleHands: ExampleHandsTree };

@@ -1,4 +1,4 @@
-import { playBlackjack, clearResults, results, DECK_SETTINGS, roundOutcome } from "../util/deck";
+import { playBlackjack, clearResults, results, DECK_SETTINGS, roundOutcome, exampleHands } from "../util/deck";
 import { WorkerInboundMessage, WorkerOutboundMessage } from "./simulationMessages";
 
 // Shadows the ambient `self: Window` (from the "dom" lib already in tsconfig.json) with the
@@ -14,7 +14,7 @@ const BATCH_INTERVAL_MS = 100;
 let intervalId: ReturnType<typeof setInterval> | undefined;
 
 function postResults() {
-  const message: WorkerOutboundMessage = { type: "results", results, roundOutcome };
+  const message: WorkerOutboundMessage = { type: "results", results, roundOutcome, exampleHands };
   self.postMessage(message);
 }
 
