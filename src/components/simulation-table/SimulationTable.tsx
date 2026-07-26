@@ -67,9 +67,17 @@ function adjustBrightness(hex: string, percentage: number) {
 
 const SimulationTable: FunctionComponent = () => {
 
-    const { results } = useSimulationResults();
+    const { results, settings } = useSimulationResults();
     const [category, setCategory] = useState<HandCategory>("hard");
     const playerClassifications = allPlayerClassifications.filter(p => categoryOf(p) === category);
+
+    const legendEntries: [string, string, boolean][] = [
+        ["S", "Stand", true],
+        ["H", "Hit", true],
+        ["D", "Double", true],
+        ["P", "Split", category === "pairs"],
+        ["R", "Surrender", settings.LATE_SURRENDER_ALLOWED],
+    ];
 
     const computeCellValue = (p: string, d: string) => {
         const allResultActions = results?.[p]?.[d];
@@ -193,6 +201,13 @@ const SimulationTable: FunctionComponent = () => {
                     ))}
                 </Button.Group>
             </ConfigProvider>
+            <div className="w-full flex justify-between rounded bg-gray-100 py-2 px-4 text-sm">
+                {legendEntries.map(([code, label, active]) => (
+                    <span key={code} className={active ? "text-black" : "text-gray-300"}>
+                        <b>{code}</b> — {label}
+                    </span>
+                ))}
+            </div>
         </div>
     );
 }

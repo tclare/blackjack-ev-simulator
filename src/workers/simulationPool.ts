@@ -1,6 +1,6 @@
 import _ from "lodash";
 import { useSyncExternalStore } from "react";
-import { BET_SIZE, DeckSettings } from "../util/deck";
+import { BET_SIZE, DECK_SETTINGS, DeckSettings } from "../util/deck";
 import { ResultsTree, RoundOutcome, WorkerInboundMessage, WorkerOutboundMessage } from "./simulationMessages";
 
 const WORKER_COUNT = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 8));
@@ -30,6 +30,7 @@ export interface SimulationSnapshot {
   losses: number;
   pushes: number;
   overallEV: string;
+  settings: DeckSettings;
 }
 
 const EMPTY_ROUND_OUTCOME: RoundOutcome = [0, 0, 0, 0, 0];
@@ -42,7 +43,11 @@ const EMPTY_ROUND_OUTCOME: RoundOutcome = [0, 0, 0, 0, 0];
 const latestResultsPerWorker: ResultsTree[] = _.times(WORKER_COUNT, () => ({}));
 const latestRoundOutcomePerWorker: RoundOutcome[] = _.times(WORKER_COUNT, () => EMPTY_ROUND_OUTCOME);
 
-let snapshot: SimulationSnapshot = { results: {}, handsPlayed: 0, wins: 0, losses: 0, pushes: 0, overallEV: "0%" };
+let currentSettings: DeckSettings = { ...DECK_SETTINGS };
+
+let snapshot: SimulationSnapshot = {
+  results: {}, handsPlayed: 0, wins: 0, losses: 0, pushes: 0, overallEV: "0%", settings: currentSettings,
+};
 const listeners = new Set<() => void>();
 
 function recomputeSnapshot() {
@@ -59,6 +64,7 @@ function recomputeSnapshot() {
     overallEV: handsPlayed > 0
       ? `${evSum > 0 ? "+" : ""}${((evSum * 100) / (handsPlayed * BET_SIZE)).toFixed(1)}%`
       : "0%",
+    settings: currentSettings,
   };
   listeners.forEach(listener => listener());
 }
@@ -104,6 +110,7 @@ const workers: Worker[] = _.times(WORKER_COUNT, (i) => {
 });
 
 export function updateSettings(settings: DeckSettings) {
+  currentSettings = settings;
   workers.forEach(worker => postToWorker(worker, { type: "settings", settings }));
   // Eagerly zero the local snapshot too, so the UI doesn't show a stale blended table for the
   // tick or two it takes each worker to actually clear and report back. Cancel any pending
