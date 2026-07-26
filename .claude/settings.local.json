@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --version)",
+      "Bash(time node sim.js 500000)",
+      "Bash(time node sim2.js 2000000)",
+      "Bash(time node sim2.js 20000000)",
+      "Bash(npx tsc --noEmit -p tsconfig.json)",
+      "Bash(git stash)",
+      "Bash(npx react-scripts build)",
+      "Bash(git stash pop)",
+      "Bash(CI=true npx react-scripts build)",
+      "Bash(node sim3.js 3000000)",
+      "Bash(node sim4.js 5000000)",
+      "Bash(node --max-old-space-size=4096 sim3.js 40000000)"
+    ]
+  }
+}
