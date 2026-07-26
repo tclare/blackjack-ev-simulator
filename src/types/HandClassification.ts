@@ -19,6 +19,7 @@ export enum PlayerHandClassification {
     SEVENTEEN = "17",
     EIGHTEEN = "18",
     NINETEEN = "19",
+    TWENTY = "20",
     ACE_TWO = "A2",
     ACE_THREE = "A3",
     ACE_FOUR = "A4",

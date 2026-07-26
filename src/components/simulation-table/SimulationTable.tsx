@@ -1,12 +1,24 @@
-import { FunctionComponent, useEffect, useState } from "react";
+import { FunctionComponent, useState } from "react";
 import { PlayerHandClassification } from "../../types/HandClassification";
 import './SimulationTable.css';
-import { BET_SIZE, HandRanks, playBlackjack, results } from "../../util/deck";
+import { BET_SIZE, HandRanks } from "../../util/deck";
+import { useSimulationResults } from "../../workers/simulationPool";
+import { formatCount } from "../../util/format";
 import _ from "lodash";
-import { Divider, Popover } from "antd";
+import { Button, Card, ConfigProvider, Divider, Popover } from "antd";
 
 const dealerClassifications = _.uniq(HandRanks.map(hr => hr.pairSymbol));
-const playerClassifications = Object.values(PlayerHandClassification);
+const allPlayerClassifications = Object.values(PlayerHandClassification);
+
+type HandCategory = "hard" | "soft" | "pairs";
+
+function categoryOf(symbol: string): HandCategory {
+    // Checked against real rank symbols (not just "are the two characters equal"), since hard
+    // total "11" would otherwise be misclassified as a pair.
+    if (symbol.length === 2 && symbol[0] === symbol[1] && dealerClassifications.includes(symbol[0])) return "pairs";
+    if (symbol.startsWith("A")) return "soft";
+    return "hard";
+}
 
 
 /**
@@ -26,8 +38,16 @@ function adjustBrightness(hex: string, percentage: number) {
     let g = parseInt(hex.slice(2, 4), 16);
     let b = parseInt(hex.slice(4, 6), 16);
 
-    // Calculate the new brightness value
-    let factor = percentage / 100;
+    // Calculate the new brightness value. Scaled against a cap well below 100 (rather than 100
+    // itself) since most real per-cell EV magnitudes fall well under that - scaling linearly
+    // against 100 crammed the entire common range (e.g. -28%, -41%, -50%) into a narrow, nearly-
+    // white band that all looked the same shade at a glance. Capping the "fully saturated" point
+    // lower spreads that common range across the whole visible color gradient instead.
+    const SATURATION_CAP_PERCENT = 50;
+    // The most intense color reached at/beyond the cap - kept a bit short of the raw base color
+    // (1.0) so the strongest cells read as a rich, toned-down shade rather than the full, harsh hue.
+    const MAX_FACTOR = 0.8;
+    let factor = Math.min(MAX_FACTOR, MAX_FACTOR * (percentage / SATURATION_CAP_PERCENT));
 
     // Adjust the RGB values, making 0% white (#ffffff)
     r = Math.min(255, Math.max(0, Math.floor(255 - (255 - r) * factor)));
@@ -47,15 +67,9 @@ function adjustBrightness(hex: string, percentage: number) {
 
 const SimulationTable: FunctionComponent = () => {
 
-    const [i, setI] = useState(0);
-
-    useEffect(() => {
-        let interval = setInterval(() => {
-          playBlackjack();
-          setI(i + 1);
-        }, 100);
-        return () => clearInterval(interval);
-    }, [i]);
+    const { results } = useSimulationResults();
+    const [category, setCategory] = useState<HandCategory>("hard");
+    const playerClassifications = allPlayerClassifications.filter(p => categoryOf(p) === category);
 
     const computeCellValue = (p: string, d: string) => {
         const allResultActions = results?.[p]?.[d];
@@ -65,11 +79,12 @@ const SimulationTable: FunctionComponent = () => {
     }
 
     const computeCellBackgroundColor = (p: string, d: string) => {
-        // console.log(p, d);
         const allResultActions = results?.[p]?.[d];
         if (!allResultActions) return "bg-gray-100";
         const allResults = Object.entries(allResultActions);
-        const bestResult = _.maxBy(allResults, v => v[1][0])?.[1];
+        // Selected the same way as computeCellValue (by EV ratio, not raw evSum) so the
+        // background color always reflects the same action the cell's letter is showing.
+        const bestResult = _.maxBy(allResults, v => computeExpectedValue(v[1]))?.[1];
         const bestExpectedValue = computeExpectedValue(bestResult);
         if (!bestResult || bestResult[0] === 0) return "bg-gray-100";
         else if (bestResult[0] > 0) return adjustBrightness("#4d7c0f", bestExpectedValue);
@@ -92,7 +107,7 @@ const SimulationTable: FunctionComponent = () => {
             <div className="flex flex-col w-[300px]">
                 <div className="flex gap-x-4 justify-between">
                     <b>Hands Played: </b>
-                    {handsPlayed.toLocaleString("en-US")}
+                    {formatCount(handsPlayed)}
                 </div>
                 <div className="flex gap-x-4 justify-between">
                     <b>Expected Value: </b>
@@ -122,45 +137,63 @@ const SimulationTable: FunctionComponent = () => {
     }
 
     return (
-        <table>
-            <thead>
-                <tr>
-                    <td className="table-header-value"/>
+        <div className="flex flex-col items-center gap-y-6">
+            <table>
+                <thead>
+                    <tr>
+                        <td className="table-header-value"/>
+                        {
+                            dealerClassifications
+                                .filter((_, i) => i < dealerClassifications.length)
+                                .map((v) => (
+                                    <td className="table-header-value text-sm" key={v}>
+                                        { v }
+                                    </td>
+                                ))
+                        }
+                    </tr>
+                </thead>
+                <tbody>
                     {
-                        dealerClassifications
-                            .filter((_, i) => i < dealerClassifications.length)
-                            .map((v) => (
-                                <td className="table-header-value text-sm" key={v}>
-                                    { v }
-                                </td>
+                        playerClassifications
+                            .map((p) => (
+                                <tr key={p}>
+                                    <td className="table-header-value text-sm">{p}</td>
+                                    {
+                                        dealerClassifications
+                                            .filter((_, i) => i < dealerClassifications.length)
+                                            .map((d) => (
+                                                <Popover trigger="click" content={computePopoverContent(p, d)}>
+                                                    <td key={d + p} style={{backgroundColor: computeCellBackgroundColor(p, d)}} className="text-sm cursor-pointer">
+                                                        {computeCellValue(p, d)}
+                                                    </td>
+                                                </Popover>
+                                            ))
+                                    }
+                                </tr>
                             ))
-                    }
-                </tr>
-            </thead>
-            <tbody>
-                {
-                    playerClassifications
-                        .filter((_, i) => i < playerClassifications.length)
-                        .map((p) => (
-                            <tr key={p}>
-                                <td className="table-header-value text-sm">{p}</td>
-                                {
-                                    dealerClassifications
-                                        .filter((_, i) => i < dealerClassifications.length)
-                                        .map((d) => (
-                                            <Popover trigger="click" content={computePopoverContent(p, d)}>                                                
-                                                <td key={d + p} style={{backgroundColor: computeCellBackgroundColor(p, d)}} className="text-sm">
-                                                    {computeCellValue(p, d)}
-                                                </td>
-                                            </Popover>
-                                        ))
-                                }
-                            </tr>
-                        ))
-                    }
-            </tbody>
-            <tfoot></tfoot>
-        </table>
+                        }
+                </tbody>
+                <tfoot></tfoot>
+            </table>
+            {/* An inline style only covers the resting state - AntD's own CSS drives hover/active
+                off its theme tokens, which still point at blue. Overriding colorPrimary here lets
+                AntD derive matching black hover/active shades itself, rather than fighting its
+                generated CSS with more inline styles. */}
+            <ConfigProvider theme={{ token: { colorPrimary: "#000000" } }}>
+                <Button.Group>
+                    {(["hard", "soft", "pairs"] as const).map((c) => (
+                        <Button
+                            key={c}
+                            type={category === c ? "primary" : "default"}
+                            onClick={() => setCategory(c)}
+                        >
+                            {c[0].toUpperCase() + c.slice(1)}
+                        </Button>
+                    ))}
+                </Button.Group>
+            </ConfigProvider>
+        </div>
     );
 }
 
