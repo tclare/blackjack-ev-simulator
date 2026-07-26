@@ -9,7 +9,9 @@ import _ from "lodash";
  * total, which never accidentally matches the first card's rank and never includes an Ace (which
  * would otherwise flip the hand to SOFT).
  */
-export const PLAYER_STARTING_HAND_RANKS: { [symbol: string]: [string, string] } = {
+export const PLAYER_STARTING_HAND_RANKS: {
+  [symbol: string]: [string, string];
+} = {
   "5": ["2", "3"],
   "6": ["2", "4"],
   "7": ["2", "5"],
@@ -45,7 +47,18 @@ export const PLAYER_STARTING_HAND_RANKS: { [symbol: string]: [string, string] } 
   AA: ["A", "A"],
 };
 
-export const DEALER_UPCARD_RANK_SYMBOLS = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "A"];
+export const DEALER_UPCARD_RANK_SYMBOLS = [
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "T",
+  "A",
+];
 
 export interface DealingScenario {
   playerRanks: [string, string];
@@ -69,7 +82,7 @@ let queueIndex = 0;
  * Returns the next dealing scenario from a shuffled, cycling queue covering every
  * (starting-hand-symbol, dealer-upcard) combination exactly once per full cycle - so rare but
  * important starting hands (pairs, in particular) get the same simulation attention as common
- * ones, instead of being sampled at their natural (much lower) card frequency.
+ * ones, instead of being sampled at their natural (much lower) card frequency!
  */
 export function getNextScenario(): DealingScenario {
   if (queueIndex >= queue.length) {
