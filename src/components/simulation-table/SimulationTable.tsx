@@ -11,12 +11,7 @@ import { HandExample } from "../../types/HandExample";
 import { Card } from "../../types/Card";
 import _ from "lodash";
 import { Button, ConfigProvider, Divider, Popover } from "antd";
-
-import {
-  FolderOpenFilled,
-  InfoCircleOutlined,
-  SettingOutlined,
-} from '@ant-design/icons';
+import { SimpleModal } from "../SimpleModal";
 
 const dealerClassifications = _.uniq(HandRanks.map(hr => hr.pairSymbol));
 const allPlayerClassifications = Object.values(PlayerHandClassification);
@@ -151,7 +146,7 @@ const ExampleHandDisplay: FunctionComponent<ExampleHandDisplayProps> = ({ exampl
                     ))}
                 </div>
             </div>
-            <div className="flex items-start py-2">
+            <div className="flex items-start py-4">
                 <div className="w-1/2 flex flex-col items-center justify-center">
                     <div className="inline-flex flex-col">
                         <div className="flex items-center">
@@ -215,10 +210,15 @@ const ExampleHandDisplay: FunctionComponent<ExampleHandDisplayProps> = ({ exampl
     );
 };
 
-const SimulationTable: FunctionComponent = () => {
+interface SimulationTableProps {
+    isMobile: boolean;
+}
+
+const SimulationTable: FunctionComponent<SimulationTableProps> = ({ isMobile }) => {
 
     const { results, exampleHands, settings } = useSimulationResults();
     const [category, setCategory] = useState<HandCategory>("hard");
+    const [selectedCell, setSelectedCell] = useState<{ p: string; d: string } | undefined>(undefined);
     const playerClassifications = allPlayerClassifications.filter(p => categoryOf(p) === category);
 
     const legendEntries: [string, string, boolean][] = [
@@ -253,28 +253,27 @@ const SimulationTable: FunctionComponent = () => {
         return (r?.[0] || 0) * 100 / ((r?.[1] || 1) * BET_SIZE) ;
     }
 
-    const computePopoverContent = (p: string, d: string) => {
+    // The fixed width only makes sense for the desktop Popover, which otherwise shrinks to fit its
+    // (much narrower) content - the mobile Modal has its own comfortable width to flex into already.
+    const computePopoverContent = (p: string, d: string, fixedWidth: boolean) => {
         const allResultActions = results?.[p]?.[d];
         if (!allResultActions) return "bg-gray-100";
         const allResults = Object.entries(allResultActions);
         const bestEntry = _.maxBy(allResults, v => computeExpectedValue(v[1]));
         const bestResult = bestEntry?.[1];
         const handsPlayed = bestResult?.[1] || 0;
-        const bestExpectedvalue = computeExpectedValue(bestResult);
         const allResultsSorted = _.sortBy(allResults, v => -computeExpectedValue(v[1]));
         const exampleHand = bestEntry && exampleHands?.[p]?.[d]?.[bestEntry[0]];
         return (
-            <div className="flex flex-col w-[330px]">
+            <div className={`flex flex-col ${fixedWidth ? "w-[330px]" : ""}`}>
                 <div className="flex gap-x-4 justify-between">
                     <b>Hands Played: </b>
                     {formatCount(handsPlayed)}
                 </div>
-                <div className="flex gap-x-4 justify-between">
-                    <b>Expected Value: </b>
-                    {`${bestExpectedvalue > 0 ? "+" : ""}${bestExpectedvalue.toFixed(1)}%`}
-                </div>
-                <Divider className="my-2" />
-                <b>Hand Breakdown</b>
+                <Divider className="my-4" />
+                {/* mb-4 matches the py-4 gap "Example Hand" gets below via its cards container - same
+                    visual gap between a bold section header and whatever comes right after it. */}
+                <b className="mb-4">Hand Breakdown</b>
                 {allResultsSorted.map(r => (
                     <div className="flex gap-x-4 justify-between">
                         <b className="text-gray-500 flex justify-between gap-x-2 w-[80px]">
@@ -292,13 +291,13 @@ const SimulationTable: FunctionComponent = () => {
                         </div>
                     </div>
                 ))}
-                <Divider className="my-2" />
+                <Divider className="my-4" />
                 {exampleHand ? (
                     <ExampleHandDisplay exampleHand={exampleHand} cellActionCode={bestEntry![0]} />
                 ) : (
                     <>
                         <b>Example Hand</b>
-                        <div className="text-gray-400 text-xs py-2">No winning example recorded yet</div>
+                        <div className="text-gray-400 text-xs py-4">No winning example recorded yet</div>
                     </>
                 )}
             </div>
@@ -307,16 +306,10 @@ const SimulationTable: FunctionComponent = () => {
 
     return (
         <div className="flex flex-col items-center gap-y-6">
-            <div className="w-full flex justify-between px-2">
-                <div className="flex">
-                    <InfoCircleOutlined />
-                </div>
-                <div className="flex gap-x-2">
-                    <FolderOpenFilled />
-                    <SettingOutlined />
-                </div>
-            </div>
-
+            {/* Fixed to the "hard" totals table's own height (the tallest of the three categories) so
+                switching between Hard/Soft/Pairs doesn't reflow the buttons/legend below it every time -
+                the shorter tables just leave empty space beneath them instead. */}
+            <div className="h-[376px] flex items-center justify-center">
             <table>
                 <thead>
                     <tr>
@@ -342,11 +335,22 @@ const SimulationTable: FunctionComponent = () => {
                                         dealerClassifications
                                             .filter((_, i) => i < dealerClassifications.length)
                                             .map((d) => (
-                                                <Popover trigger="click" content={computePopoverContent(p, d)}>
-                                                    <td key={d + p} style={{backgroundColor: computeCellBackgroundColor(p, d)}} className="text-sm cursor-pointer">
+                                                isMobile ? (
+                                                    <td
+                                                        key={d + p}
+                                                        style={{backgroundColor: computeCellBackgroundColor(p, d)}}
+                                                        className="text-sm cursor-pointer"
+                                                        onClick={() => setSelectedCell({ p, d })}
+                                                    >
                                                         {computeCellValue(p, d)}
                                                     </td>
-                                                </Popover>
+                                                ) : (
+                                                    <Popover key={d + p} trigger="click" content={computePopoverContent(p, d, true)}>
+                                                        <td style={{backgroundColor: computeCellBackgroundColor(p, d)}} className="text-sm cursor-pointer">
+                                                            {computeCellValue(p, d)}
+                                                        </td>
+                                                    </Popover>
+                                                )
                                             ))
                                     }
                                 </tr>
@@ -355,6 +359,7 @@ const SimulationTable: FunctionComponent = () => {
                 </tbody>
                 <tfoot></tfoot>
             </table>
+            </div>
             {/* An inline style only covers the resting state - AntD's own CSS drives hover/active
                 off its theme tokens, which still point at blue. Overriding colorPrimary here lets
                 AntD derive matching black hover/active shades itself, rather than fighting its
@@ -372,13 +377,25 @@ const SimulationTable: FunctionComponent = () => {
                     ))}
                 </Button.Group>
             </ConfigProvider>
-            <div className="w-full flex justify-between rounded bg-gray-100 py-2 px-4 text-sm">
-                {legendEntries.map(([code, label, active]) => (
+            {/* Desktop keeps every action listed (greyed out when inactive) so the legend's shape
+                stays constant; mobile has less room to spare, so inactive actions (e.g. Split outside
+                the Pairs tab) are dropped entirely rather than just dimmed. */}
+            <div className={`w-full flex rounded bg-gray-100 py-2 px-4 ${isMobile ? "justify-center gap-x-3 text-xs" : "justify-between text-sm"}`}>
+                {(isMobile ? legendEntries.filter(([, , active]) => active) : legendEntries).map(([code, label, active]) => (
                     <span key={code} className={active ? "text-black" : "text-gray-300"}>
-                        <b>{code}</b> — {label}
+                        <b>{code}</b>{isMobile ? ": " : " — "}{label}
                     </span>
                 ))}
             </div>
+            {isMobile && (
+                <SimpleModal
+                    title={selectedCell && `Hand Decisions (${selectedCell.p} vs ${selectedCell.d})`}
+                    open={!!selectedCell}
+                    onClose={() => setSelectedCell(undefined)}
+                >
+                    {selectedCell && computePopoverContent(selectedCell.p, selectedCell.d, false)}
+                </SimpleModal>
+            )}
         </div>
     );
 }
