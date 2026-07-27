@@ -1,19 +1,19 @@
 {
   "files": {
-    "main.css": "/blackjack-ev-simulator/static/css/main.9c14e331.css",
-    "main.js": "/blackjack-ev-simulator/static/js/main.52d0312e.js",
+    "main.css": "/blackjack-ev-simulator/static/css/main.5d10bdc3.css",
+    "main.js": "/blackjack-ev-simulator/static/js/main.ec5c5269.js",
     "static/js/186.b3237007.chunk.js": "/blackjack-ev-simulator/static/js/186.b3237007.chunk.js",
     "static/js/787.1850e202.chunk.js": "/blackjack-ev-simulator/static/js/787.1850e202.chunk.js",
     "static/js/763.e1b47184.chunk.js": "/blackjack-ev-simulator/static/js/763.e1b47184.chunk.js",
     "index.html": "/blackjack-ev-simulator/index.html",
-    "main.9c14e331.css.map": "/blackjack-ev-simulator/static/css/main.9c14e331.css.map",
-    "main.52d0312e.js.map": "/blackjack-ev-simulator/static/js/main.52d0312e.js.map",
+    "main.5d10bdc3.css.map": "/blackjack-ev-simulator/static/css/main.5d10bdc3.css.map",
+    "main.ec5c5269.js.map": "/blackjack-ev-simulator/static/js/main.ec5c5269.js.map",
     "186.b3237007.chunk.js.map": "/blackjack-ev-simulator/static/js/186.b3237007.chunk.js.map",
     "787.1850e202.chunk.js.map": "/blackjack-ev-simulator/static/js/787.1850e202.chunk.js.map",
     "763.e1b47184.chunk.js.map": "/blackjack-ev-simulator/static/js/763.e1b47184.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.9c14e331.css",
-    "static/js/main.52d0312e.js"
+    "static/css/main.5d10bdc3.css",
+    "static/js/main.ec5c5269.js"
   ]
 }
