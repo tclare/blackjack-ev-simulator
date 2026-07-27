@@ -28,8 +28,12 @@ function App() {
     // up that top gap are equal to each other, puts the title at the exact midpoint of the space
     // between the viewport's top edge and the content block's top edge. All without measuring
     // anything - it falls out of the ratio alone.
+    // h-dvh (not h-screen/100vh) tracks the mobile browser's actual visible viewport as its address
+    // bar shows/hides on scroll - 100vh instead sizes to the viewport with that chrome hidden, which
+    // is taller than what's initially visible and leaves a scrollable gap below the real content
+    // that a fixed-viewport tool like Chrome's device toolbar can't reproduce.
     return (
-      <div className="h-screen flex flex-col">
+      <div className="h-dvh flex flex-col">
         <div className="flex-1" />
         <div className="flex flex-col items-center px-4">
           <MobileAppTitle />
